@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="LeadFinder">
+<title>LeadFinder — поиск клиентов</title>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--tx:#1b1f27;--mut:#6b7280;--ac:#2f5496;--bd:#d9dee7}
+@media(prefers-color-scheme:dark){:root{--bg:#111318;--card:#1c1f27;--tx:#eef0f4;--mut:#9aa3b2;--ac:#6d9bf0;--bd:#2c313c}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.4 -apple-system,system-ui,sans-serif;padding:env(safe-area-inset-top) 12px calc(env(safe-area-inset-bottom) + 20px)}
+h1{font-size:20px;margin:16px 0 8px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin:10px 0}
+.card h2{font-size:14px;margin:0 0 8px;color:var(--mut);text-transform:uppercase;letter-spacing:.04em}
+input[type=text],input[type=number]{width:100%;padding:12px;font-size:16px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:8px 12px;border:1px solid var(--bd);border-radius:20px;font-size:14px;background:var(--bg);cursor:pointer;user-select:none}
+.chip.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+label.f{display:flex;gap:10px;align-items:center;padding:8px 0;font-size:15px}
+label.f input{width:22px;height:22px}
+.row{display:flex;gap:8px}
+button{font-size:17px;font-weight:600;padding:14px;border:0;border-radius:12px;background:var(--ac);color:#fff;width:100%}
+button.sec{background:var(--card);color:var(--ac);border:1px solid var(--ac)}
+button:disabled{opacity:.5}
+#log{font-size:13px;color:var(--mut);white-space:pre-wrap;max-height:120px;overflow:auto}
+.res{border-top:1px solid var(--bd);padding:10px 0}
+.res b{display:block}
+.res small{color:var(--mut);display:block;word-break:break-all}
+.res a{color:var(--ac)}
+</style>
+</head>
+<body>
+<h1>🔎 LeadFinder</h1>
+
+<div class="card"><h2>Города</h2>
+<input type="text" id="cities" placeholder="Москва, Казань" value="Москва"></div>
+
+<div class="card"><h2>Ниши (можно несколько)</h2><div class="chips" id="cats"></div></div>
+
+<div class="card"><h2>Фильтры</h2>
+<label class="f"><input type="checkbox" id="fNoSite" checked>Только БЕЗ сайта</label>
+<label class="f"><input type="checkbox" id="fAny" checked>Только если есть контакт</label>
+<label class="f"><input type="checkbox" id="fPhone">Только с телефоном</label>
+<label class="f"><input type="checkbox" id="fSoc">Только с соцсетью/мессенджером</label>
+<label class="f"><input type="checkbox" id="fAddr">Только с адресом</label>
+<div class="row" style="margin-top:8px">
+<input type="number" id="limit" value="300" inputmode="numeric" placeholder="Лимит">
+<input type="text" id="kw" placeholder="Слово в названии">
+</div></div>
+
+<button id="go">▶ Начать поиск</button>
+<div class="card"><div id="log">Готов к поиску.</div></div>
+
+<div id="out" hidden>
+<div class="row"><button id="dl">⬇ Сохранить CSV</button></div>
+<div class="card" id="list"></div>
+</div>
+
+<script>
+const CATS={
+"Одежда и обувь":["shop",["clothes","shoes","boutique","bag"]],
+"Цветы":["shop",["florist"]],
+"Косметика":["shop",["cosmetics","perfumery","beauty"]],
+"Салоны красоты":["shop",["hairdresser","beauty"]],
+"Продукты":["shop",["convenience","greengrocer","butcher","bakery","confectionery"]],
+"Кафе и рестораны":["amenity",["cafe","restaurant","fast_food","bar"]],
+"Автосервис":["shop",["car_repair","car_parts","tyres","car"]],
+"Стройка и ремонт":["shop",["doityourself","hardware","paint","tiles"]],
+"Мебель и интерьер":["shop",["furniture","interior_decoration","kitchen"]],
+"Электроника":["shop",["electronics","mobile_phone","computer"]],
+"Спорт":["shop",["sports","outdoor","bicycle"]],
+"Детские товары":["shop",["toys","baby_goods"]],
+"Подарки":["shop",["gift","souvenir"]],
+"Зоомагазины":["shop",["pet"]],
+"Ювелирные":["shop",["jewelry","watches"]],
+"Фитнес":["leisure",["fitness_centre","sports_centre","dance"]],
+"Любые магазины":["shop",[".*"]]};
+const SOC={Telegram:["contact:telegram","telegram"],WhatsApp:["contact:whatsapp","whatsapp"],Viber:["contact:viber","viber"],VK:["contact:vk","vk"],Instagram:["contact:instagram","instagram"],Facebook:["contact:facebook","facebook"]};
+const PHONE=["phone","contact:phone","mobile","contact:mobile","phone_1","phone_2"];
+const EMAIL=["email","contact:email"], WEB=["website","contact:website","url","contact:url"];
+const OP=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://overpass.private.coffee/api/interpreter"];
+const $=id=>document.getElementById(id);
+const chosen=new Set(["Одежда и обувь"]);
+let rows=[];
+
+for(const n in CATS){const c=document.createElement("div");c.className="chip"+(chosen.has(n)?" on":"");c.textContent=n;
+c.onclick=()=>{chosen.has(n)?chosen.delete(n):chosen.add(n);c.classList.toggle("on")};$("cats").appendChild(c)}
+
+const log=m=>{const l=$("log");l.textContent+="\n"+m;l.scrollTop=l.scrollHeight};
+const vals=(t,keys)=>{const o=[];for(const k of keys)if(t[k])for(let p of t[k].split(/[;,]\s*/)){p=p.trim();if(p&&!o.includes(p))o.push(p)}return o};
+const esc=s=>String(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function geocode(city){
+  const r=await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="+encodeURIComponent(city));
+  const d=await r.json(); if(!d.length) throw new Error("Город не найден: "+city);
+  const [s,n,w,e]=d[0].boundingbox.map(Number); return [s,w,n,e];
+}
+async function overpass(q){
+  let last="";
+  for(const u of OP){
+    try{log("Запрос к "+new URL(u).host+"…");
+      const r=await fetch(u,{method:"POST",body:"data="+encodeURIComponent(q),headers:{"Content-Type":"application/x-www-form-urlencoded"}});
+      if(r.ok){const d=await r.json();return d.elements||[]} last="HTTP "+r.status;
+    }catch(e){last=String(e)}
+  }
+  throw new Error("Серверы недоступны: "+last);
+}
+
+$("go").onclick=async()=>{
+  const cities=$("cities").value.split(/[,\n]/).map(s=>s.trim()).filter(Boolean);
+  if(!cities.length||!chosen.size){alert("Укажите город и выберите нишу");return}
+  const limit=parseInt($("limit").value)||300, kw=$("kw").value.trim().toLowerCase();
+  const F={no:$("fNoSite").checked,any:$("fAny").checked,ph:$("fPhone").checked,so:$("fSoc").checked,ad:$("fAddr").checked};
+  $("go").disabled=true;$("out").hidden=true;$("log").textContent="Поиск…";rows=[];
+  const seen=new Set();
+  try{
+    for(const city of cities){
+      log("=== "+city+" ===");
+      const [s,w,n,e]=await geocode(city);
+      const parts=[...chosen].map(c=>{const [k,v]=CATS[c];const rx=v[0]===".*"?".":"^("+v.join("|")+")$";return `nwr["${k}"~"${rx}"]["name"](${s},${w},${n},${e});`}).join("");
+      const els=await overpass(`[out:json][timeout:120];(${parts});out center tags;`);
+      log("Объектов получено: "+els.length);
+      for(const el of els){
+        if(rows.length>=limit)break;
+        const t=el.tags||{},id=el.type+el.id;
+        if(!t.name||seen.has(id))continue; seen.add(id);
+        const ph=vals(t,PHONE),em=vals(t,EMAIL),si=vals(t,WEB),so={};
+        for(const k in SOC)so[k]=vals(t,SOC[k]);
+        const all=[...ph,...em,...Object.values(so).flat()];
+        const ad=[t["addr:city"],t["addr:street"],t["addr:housenumber"]].filter(Boolean).join(", ");
+        if(F.no&&si.length)continue; if(F.any&&!all.length)continue; if(F.ph&&!ph.length)continue;
+        if(F.so&&!Object.values(so).some(a=>a.length))continue; if(F.ad&&!ad)continue;
+        if(kw&&!t.name.toLowerCase().includes(kw))continue;
+        rows.push({name:t.name,cat:t.shop||t.amenity||t.leisure||"",city,ad,ph,em,so,all,si,src:`https://www.openstreetmap.org/${el.type}/${el.id}`});
+      }
+    }
+    log("Подошло под фильтры: "+rows.length);
+    render();
+  }catch(e){log("ОШИБКА: "+e.message)}
+  $("go").disabled=false;
+};
+
+function render(){
+  $("out").hidden=!rows.length;
+  $("list").innerHTML="<h2>Найдено: "+rows.length+"</h2>"+rows.map(r=>`<div class="res"><b>${esc(r.name)}</b>
+  <small>${esc(r.cat)} • ${esc(r.ad)||"адрес не указан"}</small>
+  <small>${r.all.map(esc).join(" • ")||"нет контактов"}</small>
+  <small><a href="${r.src}" target="_blank" rel="noopener">источник</a></small></div>`).join("");
+}
+
+const cell=v=>'"'+String(v||"").replace(/"/g,'""')+'"';
+$("dl").onclick=async()=>{
+  const head=["№","Организация","Категория","Город","Адрес","Телефон(ы)","Email","Telegram","WhatsApp","Viber","VK","Instagram","Facebook","ВСЕ КОНТАКТЫ","Текущий сайт","Источник (ссылка)","Заметки"];
+  const L=[head.map(cell).join(";")];
+  rows.forEach((r,i)=>L.push([i+1,r.name,r.cat,r.city,r.ad,r.ph.join(" | "),r.em.join(" | "),r.so.Telegram.join(" | "),r.so.WhatsApp.join(" | "),r.so.Viber.join(" | "),r.so.VK.join(" | "),r.so.Instagram.join(" | "),r.so.Facebook.join(" | "),r.all.join(" | "),r.si.join(" | ")||"НЕТ САЙТА",r.src,""].map(cell).join(";")));
+  const file=new File(["\uFEFF"+L.join("\n")],"clients.csv",{type:"text/csv"});
+  if(navigator.canShare&&navigator.canShare({files:[file]})){try{await navigator.share({files:[file]});return}catch(e){if(e.name==="AbortError")return}}
+  const a=document.createElement("a");a.href=URL.createObjectURL(file);a.download="clients.csv";a.click();
+};
+</script>
+</body>
+</html>
